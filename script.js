@@ -460,14 +460,15 @@
 
   // =========================================================
   // AQUATIC WAVES — added in the aquatic fork
-  //   1. a gently heaving water surface on top of every trophic tier
-  //   2. slow ripple bands + caustic-like light moving over each tier's faces
-  //   3. a few small bubbles rising through the water around the pyramid
+  //   1. a Gerstner-wave water surface on top of every trophic tier (sun glint, fresnel, crest foam)
+  //   2. drifting caustic light on each tier's faces, brightest just under the surface
+  //   3. OXYGEN bubbles from the producers (TL1) only, and only while light reaches them
   // Purely visual: the surfaces/overlays are children of the layer meshes (so they
   // follow the selection scale) and are never raycast (layer picking is
   // non-recursive). Nothing here touches energy, biomass, selection or the Sun.
   // =========================================================
   var aquaWaveTime = { value: 0 };
+  var aquaSunPos = { value: new THREE.Vector3(-9, 8, 0) }, aquaSunOn = { value: 0 };   // shared by every tier: where the Sun is, and how bright
   function aquaNoRaycast(){}
 
   function buildWaterSurfaceGeometry(y, hw, hd, N){
@@ -501,32 +502,52 @@
     var deep = base.clone().lerp(new THREE.Color(0x0b3a5c), 0.55);     // the tier's colour under blue water
     var light = base.clone().lerp(new THREE.Color(0xe8fbff), 0.55);    // sunlit crest
 
-    // 1. heaving water surface just above the tier's top face
+    // 1. realistic water surface on top of the tier: Gerstner waves (crests sharpen, troughs flatten) from
+    //    four directions, lit by the Sun — fresnel sky reflection, a moving sun glint and foam on the crests.
     var yS = layer.yTop + 0.03;
-    var surfGeo = buildWaterSurfaceGeometry(yS, halfW(layer.yTop) * 0.97, halfD(layer.yTop) * 0.97, 30);
+    var surfGeo = buildWaterSurfaceGeometry(yS, halfW(layer.yTop) * 0.97, halfD(layer.yTop) * 0.97, 48);
     var surfMat = new THREE.ShaderMaterial({
       uniforms: {
-        uTime: aquaWaveTime, uDeep: { value: deep }, uLight: { value: light },
-        uAmp: { value: 0.065 }, uSeed: { value: id * 1.37 }
+        uTime: aquaWaveTime, uSunPos: aquaSunPos, uSunOn: aquaSunOn,
+        uDeep: { value: deep }, uShallow: { value: light }, uSeed: { value: id * 1.37 }
       },
       vertexShader:
-        "uniform float uTime; uniform float uAmp; uniform float uSeed;\n" +
-        "varying float vH; varying vec2 vXZ;\n" +
+        "uniform float uTime; uniform float uSeed;\n" +
+        "varying vec3 vWorld; varying vec3 vN; varying float vCrest;\n" +
+        // one Gerstner wave: d = direction, k = wavenumber, a = amplitude, s = speed, q = steepness
+        "void wave(vec2 d, float k, float a, float s, float q, vec3 p0, inout vec3 p, inout vec3 n, inout float crest){\n" +
+        "  float f = k * dot(d, p0.xz) - s * uTime + uSeed;\n" +
+        "  float c = cos(f), sn = sin(f);\n" +
+        "  p.x += q * a * d.x * c; p.z += q * a * d.y * c; p.y += a * sn;\n" +
+        "  n.x -= d.x * k * a * c; n.z -= d.y * k * a * c; n.y -= q * k * a * sn;\n" +
+        "  crest += sn * a;\n" +
+        "}\n" +
         "void main(){\n" +
-        "  vec3 p = position;\n" +
-        "  float h = 0.55*sin(p.x*2.1 + uTime*1.25 + uSeed) + 0.35*sin(p.z*2.9 - uTime*1.05 + uSeed*1.7)\n" +
-        "          + 0.22*sin((p.x - p.z)*4.6 + uTime*2.1);\n" +
-        "  p.y += h * uAmp; vH = h; vXZ = p.xz;\n" +
-        "  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);\n" +
+        "  vec3 p0 = position, p = position, n = vec3(0.0, 1.0, 0.0); float crest = 0.0;\n" +
+        "  wave(normalize(vec2( 1.0, 0.35)), 2.3, 0.032, 1.6, 0.55, p0, p, n, crest);\n" +
+        "  wave(normalize(vec2(-0.6, 1.0)),  3.1, 0.020, 1.9, 0.50, p0, p, n, crest);\n" +
+        "  wave(normalize(vec2( 0.2,-1.0)),  4.7, 0.011, 2.6, 0.45, p0, p, n, crest);\n" +
+        "  wave(normalize(vec2(-1.0,-0.3)),  7.9, 0.006, 3.4, 0.40, p0, p, n, crest);\n" +
+        "  vCrest = crest / 0.069;\n" +                                        // -1 trough .. +1 crest
+        "  vec4 w = modelMatrix * vec4(p, 1.0); vWorld = w.xyz;\n" +
+        "  vN = normalize(mat3(modelMatrix) * normalize(n));\n" +
+        "  gl_Position = projectionMatrix * viewMatrix * w;\n" +
         "}",
       fragmentShader:
-        "uniform vec3 uDeep; uniform vec3 uLight; uniform float uTime;\n" +
-        "varying float vH; varying vec2 vXZ;\n" +
+        "uniform float uTime; uniform vec3 uSunPos; uniform float uSunOn; uniform vec3 uDeep; uniform vec3 uShallow;\n" +
+        "varying vec3 vWorld; varying vec3 vN; varying float vCrest;\n" +
         "void main(){\n" +
-        "  float t = smoothstep(-0.9, 1.1, vH);\n" +
-        "  float glint = smoothstep(0.75, 1.05, vH) * (0.6 + 0.4*sin(vXZ.x*7.0 + vXZ.y*5.0 - uTime*2.4));\n" +
-        "  vec3 col = mix(uDeep, uLight, t) + glint*0.35;\n" +
-        "  gl_FragColor = vec4(col, 0.28 + 0.22*t + 0.25*glint);\n" +
+        "  vec3 N = normalize(vN); if (!gl_FrontFacing) N = -N;\n" +
+        "  vec3 V = normalize(cameraPosition - vWorld), L = normalize(uSunPos - vWorld);\n" +
+        "  float ndv = clamp(dot(N, V), 0.0, 1.0);\n" +
+        "  float fres = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);\n" +             // Schlick fresnel: grazing views reflect more
+        "  vec3 body = mix(uDeep, uShallow, smoothstep(-0.8, 1.0, vCrest) * 0.75 + 0.25 * max(dot(N, L), 0.0));\n" +
+        "  vec3 sky = mix(vec3(0.10, 0.22, 0.32), vec3(0.55, 0.78, 0.92), 0.35 + 0.65 * uSunOn);\n" +
+        "  float spec = pow(max(dot(reflect(-L, N), V), 0.0), 90.0) * (0.25 + 1.6 * uSunOn);\n" +   // sun glint
+        "  float foamN = 0.5 + 0.5 * sin(vWorld.x * 23.0 + uTime * 1.3) * sin(vWorld.z * 19.0 - uTime * 1.1);\n" +
+        "  float foam = smoothstep(0.62, 0.95, vCrest) * (0.35 + 0.65 * foamN);\n" +
+        "  vec3 col = mix(body, sky, fres) + vec3(1.0, 0.97, 0.88) * spec + vec3(0.92, 0.97, 1.0) * foam * 0.45;\n" +
+        "  gl_FragColor = vec4(col, clamp(0.34 + 0.40 * fres + 0.35 * spec + 0.25 * foam, 0.0, 0.92));\n" +
         "}",
       transparent: true, depthWrite: false, side: THREE.DoubleSide
     });
@@ -537,26 +558,36 @@
     layerMesh.add(surf);
     aquaSurfaces.push(surf);
 
-    // 2. ripple bands + caustic light on the tier's own faces (shares the layer geometry)
+    // 2. underwater light on the tier's faces: drifting caustic network (light focused by the waves
+    //    above), strongest just under the surface and fading with depth, plus faint travelling swell lines.
     var rippleMat = new THREE.ShaderMaterial({
       uniforms: {
-        uTime: aquaWaveTime, uCol: { value: light.clone().lerp(new THREE.Color(0xbff6ff), 0.3) },
+        uTime: aquaWaveTime, uSunOn: aquaSunOn, uCol: { value: light.clone().lerp(new THREE.Color(0xbff6ff), 0.35) },
         uY0: { value: layer.yBottom }, uY1: { value: layer.yTop }, uSeed: { value: id * 2.11 }
       },
       vertexShader:
         "varying vec3 vPos;\n" +
         "void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
       fragmentShader:
-        "uniform float uTime; uniform vec3 uCol; uniform float uY0; uniform float uY1; uniform float uSeed;\n" +
+        "uniform float uTime; uniform float uSunOn; uniform vec3 uCol; uniform float uY0; uniform float uY1; uniform float uSeed;\n" +
         "varying vec3 vPos;\n" +
+        "float caustic(vec2 p, float t){\n" +                                  // domain-warped sine network -> thin bright lines
+        "  float c = 0.0;\n" +
+        "  for (int i = 0; i < 3; i++){\n" +
+        "    float fi = float(i);\n" +
+        "    p += vec2(sin(p.y * 1.7 + t * 0.9 + fi * 1.3), cos(p.x * 1.4 - t * 0.7 + fi * 2.1)) * 0.42;\n" +
+        "    c += abs(sin(p.x * 1.1) * cos(p.y * 1.1));\n" +
+        "  }\n" +
+        "  return pow(1.0 - clamp(c / 3.0, 0.0, 1.0), 6.0);\n" +
+        "}\n" +
         "void main(){\n" +
-        "  float wob = 0.10*sin(vPos.x*2.3 + uTime*1.2 + uSeed) + 0.07*sin(vPos.z*3.1 - uTime*0.9 + uSeed*2.0);\n" +
-        "  float w = sin((vPos.y + wob) * 8.0 - uTime*1.5);\n" +
-        "  float band = smoothstep(0.80, 1.0, w);\n" +                                  // thin travelling wave crests
         "  float ty = clamp((vPos.y - uY0) / (uY1 - uY0), 0.0, 1.0);\n" +
-        "  float top = smoothstep(0.70, 1.0, ty);\n" +                                  // brighter just under each surface
-        "  float caus = pow(max(0.0, sin(vPos.x*5.3 + uTime*1.7) * sin(vPos.z*4.7 - uTime*1.3 + vPos.y*2.0)), 3.0);\n" +
-        "  gl_FragColor = vec4(uCol, 0.13*band + 0.09*top*(0.5 + 0.5*w) + 0.10*caus);\n" +
+        "  vec2 q = vec2(vPos.x + vPos.z * 0.6, vPos.z - vPos.x * 0.3 + vPos.y * 0.8) * 2.4 + uSeed;\n" +
+        "  float caus = caustic(q, uTime) * (0.25 + 0.75 * smoothstep(0.15, 1.0, ty));\n" +   // brighter near the surface
+        "  float wob = 0.08 * sin(vPos.x * 2.3 + uTime * 1.1 + uSeed) + 0.06 * sin(vPos.z * 3.1 - uTime * 0.8);\n" +
+        "  float swell = smoothstep(0.86, 1.0, sin((vPos.y + wob) * 7.0 - uTime * 1.2));\n" +
+        "  float light = 0.55 + 0.45 * uSunOn;\n" +
+        "  gl_FragColor = vec4(uCol, (0.22 * caus + 0.06 * swell + 0.05 * smoothstep(0.82, 1.0, ty)) * light);\n" +
         "}",
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
@@ -568,44 +599,125 @@
     layerMesh.add(ripple);
   });
 
-  // 3. bubbles: small rings rising slowly with a side-to-side wobble
-  var BUBBLE_N = 46;
+  // 3. OXYGEN BUBBLES — from the PRODUCERS (TL1) only, and only in light.
+  //    Photosynthesis releases O2 (like the classic Hydrilla bubble experiment); consumers do not:
+  //    they USE oxygen in respiration. So: Sun off -> no bubbles; after PAR reaches TL1 the bubbles
+  //    start from the living producers, rise (growing slightly as pressure falls) and pop at TL1's
+  //    water surface. Dead producers stop bubbling. Purely visual; no effect on energy or biomass.
   var bubbleTexture = (function(){
     var size = 64, c = document.createElement("canvas");
     c.width = c.height = size;
     var g = c.getContext("2d");
-    g.strokeStyle = "rgba(220,250,255,0.95)"; g.lineWidth = 4;
-    g.beginPath(); g.arc(32, 32, 24, 0, Math.PI * 2); g.stroke();
-    g.fillStyle = "rgba(255,255,255,0.9)";
-    g.beginPath(); g.arc(23, 22, 5, 0, Math.PI * 2); g.fill();                 // highlight
+    var grad = g.createRadialGradient(32, 32, 14, 32, 32, 27);              // clear centre, bright rim
+    grad.addColorStop(0, "rgba(205,242,255,0.22)"); grad.addColorStop(0.7, "rgba(215,246,255,0.5)"); grad.addColorStop(1, "rgba(240,253,255,1)");
+    g.fillStyle = grad; g.beginPath(); g.arc(32, 32, 27, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "rgba(255,255,255,0.95)";
+    g.beginPath(); g.ellipse(23, 21, 6, 4, -0.6, 0, Math.PI * 2); g.fill();  // highlight
     return new THREE.CanvasTexture(c);
   })();
-  var bubblePos = new Float32Array(BUBBLE_N * 3), bubbleData = [];
-  for (var bi = 0; bi < BUBBLE_N; bi++){
-    var bd = { x: (Math.random() - 0.5) * 16, z: (Math.random() - 0.5) * 10, y: Math.random() * 13,
-               v: 0.25 + Math.random() * 0.35, ph: Math.random() * 6.283, amp: 0.08 + Math.random() * 0.14 };
-    bubbleData.push(bd);
+  var O2_N = 70;
+  var o2Pos = new Float32Array(O2_N * 3), o2Size = new Float32Array(O2_N), o2Alpha = new Float32Array(O2_N), o2 = [];
+  for (var oi = 0; oi < O2_N; oi++) o2.push({ live: false, wait: Math.random() * 1.5, x: 0, y: -50, z: 0, v: 0, s: 0, ph: 0, pop: 0 });
+  var o2Geo = new THREE.BufferGeometry();
+  o2Geo.setAttribute("position", new THREE.BufferAttribute(o2Pos, 3));
+  o2Geo.setAttribute("aSize", new THREE.BufferAttribute(o2Size, 1));
+  o2Geo.setAttribute("aAlpha", new THREE.BufferAttribute(o2Alpha, 1));
+  var o2Mat = new THREE.ShaderMaterial({
+    uniforms: { uTex: { value: bubbleTexture }, uScale: { value: 400 }, uMinPx: { value: 6 } },
+    vertexShader:
+      "uniform float uScale; uniform float uMinPx; attribute float aSize; attribute float aAlpha; varying float vA;\n" +
+      "void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = aSize > 0.0 ? max(aSize * uScale / max(0.1, -mv.z), uMinPx * aSize / 0.28) : 0.0; gl_Position = projectionMatrix * mv; vA = aAlpha; }",
+    fragmentShader:
+      "uniform sampler2D uTex; varying float vA;\n" +
+      "void main(){ vec4 t = texture2D(uTex, gl_PointCoord); float a = t.a * vA; if (a < 0.01) discard; gl_FragColor = vec4(t.rgb, a); }",
+    transparent: true, depthWrite: false, depthTest: false
+  });
+  var o2Points = new THREE.Points(o2Geo, o2Mat);
+  o2Points.frustumCulled = false;
+  o2Points.renderOrder = 3;
+  o2Points.raycast = aquaNoRaycast;
+  scene.add(o2Points);
+  var o2Rate = 0;
+
+  function o2Spawn(b){
+    var L1 = layers[0], src = null, living = [];
+    if (typeof ORGANISM_ASSETS !== "undefined") ORGANISM_ASSETS.forEach(function(a){ if (a.trophicLevel === 1 && a.status === "living" && organismSlots[a.id]) living.push(organismSlots[a.id].sprite.position); });
+    var y, hw, hd, x, z;
+    if (living.length && Math.random() < 0.75){                          // most bubbles stream from the plants / algae themselves
+      src = living[Math.floor(Math.random() * living.length)];
+      y = THREE.MathUtils.clamp(src.y + (Math.random() - 0.6) * 0.6, L1.yBottom + 0.1, L1.yTop - 0.3);
+      x = src.x + (Math.random() - 0.5) * 0.7; z = src.z + (Math.random() - 0.5) * 0.5;
+    } else {                                                               // the rest anywhere in the producer tier
+      y = THREE.MathUtils.lerp(L1.yBottom + 0.1, L1.yTop - 0.6, Math.random());
+      var u = Math.random(), v = Math.random(); if (u + v > 1){ u = 1 - u; v = 1 - v; }
+      hw = halfW(y) * 0.8; hd = halfD(y) * 0.8;
+      x = 0.866 * hw * (u - v); z = hd * (1 - u - v) - 0.5 * hd * (u + v);
+    }
+    // keep the start inside TL1's cross-section at that height
+    hw = halfW(y) * 0.86; hd = halfD(y) * 0.86;
+    var F = [0, hd], R = [0.866 * hw, -0.5 * hd], Lf = [-0.866 * hw, -0.5 * hd];
+    var sd = function(p, q){ return (x - q[0]) * (p[1] - q[1]) - (p[0] - q[0]) * (z - q[1]); };
+    var d1 = sd(F, R), d2 = sd(R, Lf), d3 = sd(Lf, F);
+    if ((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0)){ x *= 0.4; z = z * 0.4; }
+    b.live = true; b.pop = 0; b.x = x; b.y = y; b.z = z;
+    b.v = 0.30 + Math.random() * 0.35; b.s = 0.20 + Math.random() * 0.16;   // drawn larger than life so they read at classroom distance b.ph = Math.random() * 6.283;
   }
-  var bubbleGeo = new THREE.BufferGeometry();
-  bubbleGeo.setAttribute("position", new THREE.BufferAttribute(bubblePos, 3));
-  var bubbles = new THREE.Points(bubbleGeo, new THREE.PointsMaterial({
-    size: 0.16, map: bubbleTexture, transparent: true, opacity: 0.42, depthWrite: false, sizeAttenuation: true
-  }));
-  bubbles.frustumCulled = false;
-  bubbles.raycast = aquaNoRaycast;
-  scene.add(bubbles);
 
   function updateAquaticWaves(elapsedTime, delta){
     aquaWaveTime.value = elapsedTime;
-    for (var i = 0; i < BUBBLE_N; i++){
-      var b = bubbleData[i];
-      b.y += b.v * delta;
-      if (b.y > 13.5){ b.y = 0.1; b.x = (Math.random() - 0.5) * 16; b.z = (Math.random() - 0.5) * 10; }
-      bubblePos[i * 3]     = b.x + Math.sin(elapsedTime * 1.3 + b.ph) * b.amp;
-      bubblePos[i * 3 + 1] = b.y;
-      bubblePos[i * 3 + 2] = b.z + Math.cos(elapsedTime * 1.1 + b.ph) * b.amp * 0.6;
+    if (typeof SUN_POSITION !== "undefined" && SUN_POSITION) aquaSunPos.value.copy(SUN_POSITION);
+    var glow = (typeof sunData !== "undefined" && sunData) ? sunData.currentGlow : 0;
+    aquaSunOn.value = glow;
+    o2Uniform();
+    // light reaching the producers: PAR has arrived (producers activating / energised); scaled by the living producers
+    var lit = (typeof simState !== "undefined" && typeof SIM_STATE !== "undefined") &&
+              (simState === SIM_STATE.PRODUCER_ACTIVATING || simState === SIM_STATE.PRODUCER_ENERGISED);
+    var living = 1;                                                       // share of the producer organisms still alive
+    if (typeof ORGANISM_ASSETS !== "undefined"){
+      var nP = 0, nL = 0;
+      ORGANISM_ASSETS.forEach(function(a){ if (a.trophicLevel === 1){ nP++; if (a.status === "living") nL++; } });
+      living = nP ? nL / nP : 0;
     }
-    bubbleGeo.attributes.position.needsUpdate = true;
+    o2Rate += ((lit ? living : 0) - o2Rate) * Math.min(1, delta * 1.5);
+    var surfaceY = layers[0].yTop + 0.03, any = false;
+    for (var i = 0; i < O2_N; i++){
+      var b = o2[i];
+      if (!b.live){
+        b.wait -= delta;
+        if (b.wait <= 0){
+          b.wait = 0.2 + Math.random() * 1.6;
+          if (Math.random() < o2Rate) o2Spawn(b);
+        }
+        o2Alpha[i] = 0; o2Size[i] = 0;
+        continue;
+      }
+      any = true;
+      if (b.pop > 0){                                                      // popping at the surface: a quick flash and gone
+        b.pop += delta;
+        var k = b.pop / 0.18;
+        o2Size[i] = b.s * (1.35 + 0.6 * k); o2Alpha[i] = Math.max(0, 0.9 * (1 - k));
+        if (k >= 1){ b.live = false; o2Alpha[i] = 0; o2Size[i] = 0; }
+        continue;
+      }
+      b.v += delta * 0.08;                                                 // speeds up a little as it rises
+      b.y += b.v * delta;
+      var rise = THREE.MathUtils.clamp((b.y - layers[0].yBottom) / (surfaceY - layers[0].yBottom), 0, 1);
+      o2Pos[i * 3]     = b.x + Math.sin(elapsedTime * 3.1 + b.ph) * 0.035 * (0.5 + rise);   // small zig-zag
+      o2Pos[i * 3 + 1] = b.y;
+      o2Pos[i * 3 + 2] = b.z + Math.cos(elapsedTime * 2.7 + b.ph) * 0.025;
+      o2Size[i] = b.s * (1 + 0.35 * rise);                                  // grows as water pressure falls
+      o2Alpha[i] = 0.85 * Math.min(1, (b.y - (layers[0].yBottom + 0.05)) * 4 + 0.2);
+      if (b.y >= surfaceY) b.pop = 1e-4;
+    }
+    o2Points.visible = any;
+    o2Geo.attributes.position.needsUpdate = true;
+    o2Geo.attributes.aSize.needsUpdate = true;
+    o2Geo.attributes.aAlpha.needsUpdate = true;
+  }
+  function o2Uniform(){                                                    // point size follows the canvas height (as PointsMaterial does)
+    var h = (renderer && renderer.domElement) ? renderer.domElement.height : 800;
+    o2Mat.uniforms.uScale.value = h * 0.5;
+    o2Mat.uniforms.uMinPx.value = 7 * ((renderer && renderer.getPixelRatio) ? renderer.getPixelRatio() : 1);   // still readable from the default (far) view
   }
 
   // =========================================================
