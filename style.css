@@ -1,0 +1,821 @@
+  :root{
+    --bg:#041420;
+    --panel-bg:rgba(10,14,22,0.55);
+    --panel-border:rgba(255,255,255,0.09);
+    --text:#e7ecf5;
+    --text-dim:#7c8aa3;
+    --accent:#8fe3c7;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:var(--bg);
+    color:var(--text);
+    font-family:Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    overflow:hidden;
+    touch-action:none;
+    -webkit-user-select:none; user-select:none;
+    -webkit-touch-callout:none;
+  }
+  input, textarea, [contenteditable="true"]{
+    -webkit-user-select:text; user-select:text;   /* URLs and text fields stay pasteable/selectable */
+  }
+  #canvas-container{ position:fixed; inset:0; touch-action:none; }
+  #canvas-container canvas{ display:block; }
+
+  #ui{
+    position:fixed; inset:0;
+    display:flex; flex-direction:column; justify-content:space-between;
+    padding: clamp(16px,3.2vw,30px);
+    padding-top: max(clamp(16px,3.2vw,30px), env(safe-area-inset-top, 0px));
+    padding-bottom: max(clamp(16px,3.2vw,30px), env(safe-area-inset-bottom, 0px));
+    padding-left: max(clamp(16px,3.2vw,30px), env(safe-area-inset-left, 0px));
+    padding-right: max(clamp(16px,3.2vw,30px), env(safe-area-inset-right, 0px));
+    pointer-events:none;
+  }
+  .header .title{ font-size:clamp(16px,2.6vw,20px); font-weight:600; letter-spacing:0.01em; }
+  .header .subtitle{ font-size:12.5px; color:var(--text-dim); margin-top:3px; font-weight:400; }
+  /* Centred brand row: Rinnegan-style eye + title */
+  .header .title-row{ display:flex; align-items:center; justify-content:center; gap:9px; }
+  .header .brand-eye{ width:32px; height:32px; flex:none; }   /* the soft radial glow is part of the SVG */
+  .header .title-row + .subtitle{ text-align:center; }
+
+  .bottom-row{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; }
+
+  .panel{
+    pointer-events:auto;
+    background:var(--panel-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border:1px solid var(--panel-border);
+    border-radius:12px;
+    padding:10px 14px;
+    min-width:190px;
+    max-width:min(260px, 62vw);
+  }
+
+  /* ---- Ecological dynamics graph: ONE compact, single-variable
+     SVG spanning TL1..TL4. Only the currently-selected variable
+     (energy / heat / biomass) is plotted at a time, switched via
+     the three small tab buttons below it — never all three at
+     once, and never three separate graphs. It scales via its
+     viewBox — width:100% with height:auto keeps the whole graph
+     (line, markers AND labels) scaling together as the panel
+     reflows, rather than clipping or forcing the panel to overflow.
+     Kept deliberately short so it reads as a small analytical
+     readout, not a second visualization competing with the pyramid.
+     The trace is drawn progressively (segment by segment, up to the
+     selected trophic level) by updateEcoGraph() in the script below. ---- */
+  .eco-graph{ margin:2px 0 1px; }
+  .eco-graph svg{ display:block; width:100%; height:auto; overflow:visible; }
+  .eco-var-label{
+    font-family:Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size:10px; font-weight:600; letter-spacing:0.04em;
+  }
+  .eco-value-label{
+    font-family:Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size:9.5px;
+    fill:var(--text-dim);
+  }
+  .eco-var-underline{ stroke:rgba(255,255,255,0.12); stroke-width:1; }
+  .eco-axis-label{
+    font-family:Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size:8px;
+    fill:var(--text-dim);
+    text-anchor:middle;
+  }
+  .eco-guide{
+    stroke:rgba(255,255,255,0.22); stroke-width:1;
+    stroke-dasharray:2 2;
+  }
+  .eco-trace{
+    fill:none; stroke-width:1.8;
+    stroke-linecap:round; stroke-linejoin:round;
+  }
+  .eco-marker{ stroke:none; }
+
+  .eco-var-selector{ display:flex; gap:4px; margin-top:4px; flex-wrap:wrap; }
+  .eco-var-btn{
+    pointer-events:auto;
+    background:rgba(255,255,255,0.04);
+    border:1px solid rgba(255,255,255,0.12);
+    color:var(--text-dim);
+    font-family:Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size:8px; letter-spacing:0.02em;
+    padding:3px 7px;
+    border-radius:6px;
+    cursor:pointer;
+  }
+  .eco-var-btn:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+  .eco-var-btn.active{ color:#05070d; font-weight:700; border-color:transparent; }
+  .eco-var-btn[data-var="energy"].active{ background:#c6ea5a; }
+  .eco-var-btn[data-var="heat"].active{ background:#ff9b54; }
+  .eco-var-btn[data-var="biomass"].active{ background:#4ade80; }
+
+  .reset-btn{
+    pointer-events:auto;
+    background:var(--panel-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border:1px solid var(--panel-border);
+    color:var(--text);
+    font-family:Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size:12.5px;
+    font-weight:500;
+    padding:10px 15px;
+    border-radius:10px;
+    cursor:pointer;
+    display:flex; align-items:center; gap:7px;
+    white-space:nowrap;
+  }
+  .reset-btn:hover{ border-color:rgba(255,255,255,0.28); }
+  .reset-btn:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  .export-actions{position:fixed;right:max(clamp(16px,3.2vw,30px), env(safe-area-inset-right, 0px));bottom:calc(82px + env(safe-area-inset-bottom, 0px));display:flex;gap:8px;pointer-events:none;z-index:25}
+  .export-btn{width:34px;height:34px;padding:0;border-radius:9px;pointer-events:auto;display:grid;place-items:center;cursor:pointer;color:var(--text);background:var(--panel-bg);border:1px solid var(--panel-border);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+  .export-btn:hover{border-color:rgba(143,227,199,.7);color:var(--accent)}.export-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.export-btn svg{width:16px;height:16px}
+  @media (pointer:coarse){ .export-btn{ width:42px; height:42px; } .export-btn svg{ width:18px; height:18px; } }
+  .reset-btn svg{ width:14px; height:14px; opacity:0.85; }
+
+  /* ---- Step navigation for the ecosystem-flow sequence — docked inside the Trophic Level card,
+     as two minimal round chevrons either side of a compact "n / 7" readout ---- */
+  .panel-actions{
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
+    gap:8px 10px; margin-top:10px;
+  }
+  .flow-nav{
+    display:flex; align-items:center; gap:6px;
+    touch-action:none;                  /* gestures here never reach the 3D scene */
+  }
+  .flow-nav-btn{
+    pointer-events:auto;
+    width:38px; height:38px; padding:0; border-radius:50%;
+    display:grid; place-items:center;
+    color:var(--text);
+    background:rgba(255,255,255,0.05);
+    backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+    border:1px solid rgba(255,255,255,0.13);
+    cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent;
+    transition:opacity .2s ease, border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  .flow-nav-btn svg{ width:15px; height:15px; }
+  .flow-nav-btn:active:not(:disabled){ border-color:#8fe3c7; color:#8fe3c7; background:rgba(143,227,199,0.14); }
+  .flow-nav-btn.flash:not(:disabled){ animation:flowNavFlash .28s ease-out; }
+  @keyframes flowNavFlash{ from{ border-color:#8fe3c7; color:#8fe3c7; background:rgba(143,227,199,0.18); } }
+  .export-btn.flash-ok{ animation:flowNavFlash .28s ease-out; }
+  .export-btn.flash-err{ animation:importFlashErr .32s ease-out; }
+  @keyframes importFlashErr{ from{ border-color:#f87171; color:#f87171; background:rgba(248,113,113,0.16); } }
+  .flow-nav-btn:disabled{ opacity:0.3; cursor:default; }
+  .flow-nav-btn:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  .flow-nav-status{
+    min-width:0; max-width:96px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    font-family:Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size:11.5px; letter-spacing:0.02em;
+    color:var(--text-dim);
+    transition:color .3s ease;
+  }
+  .flow-nav-status.on{ color:var(--accent); }
+
+  .hint{ pointer-events:none; font-size:11.5px; color:var(--text-dim); margin-top:8px; max-width:200px; line-height:1.4; }
+  .hint-toggle{
+    display:none;                     /* only shown under 520px */
+    pointer-events:auto; flex:none; width:22px; height:22px; margin-left:6px; padding:0;
+    border-radius:50%; border:1px solid var(--panel-border); background:rgba(255,255,255,0.06);
+    color:var(--text-dim); font:600 11px Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; cursor:pointer; -webkit-tap-highlight-color:transparent;
+  }
+  .hint-toggle.active{ color:var(--accent); border-color:rgba(143,227,199,0.6); }
+  .hint-popover{
+    display:none; position:absolute; left:0; right:0; bottom:calc(100% + 8px); z-index:5;
+    padding:10px 12px; border-radius:10px; font-size:11.5px; line-height:1.4; color:var(--text);
+    background:var(--panel-bg); border:1px solid var(--panel-border);
+    backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+  }
+  .hint-popover.open{ display:block; }
+  @media (max-width:520px){
+    .hint-toggle{ display:inline-grid; place-items:center; }
+    .panel{ position:relative; }
+  }
+
+  .solar-status{
+    pointer-events:none;
+    font-size:12px;
+    color:#f5c87a;
+    margin-top:7px;
+    display:flex; align-items:center; gap:6px;
+    transition: color 0.4s ease;
+  }
+  .solar-status .dot{
+    width:7px; height:7px; border-radius:50%;
+    background:#5a4a2e;
+    transition: background 0.4s ease, box-shadow 0.4s ease;
+  }
+  .solar-status.on{ color:#ffd479; }
+  .solar-status.on .dot{ background:#ffd479; box-shadow:0 0 8px 1px rgba(255,212,121,0.7); }
+
+  /* ---- Trophic profile mini-tab (Chrome-tab style) ---- */
+  #profilePanel{
+    position:fixed;
+    left:50%; bottom:0;
+    transform:translate(-50%, 105%);
+    width:min(400px, 92vw);
+    max-height:64vh;
+    background:rgba(13,17,26,0.93);
+    backdrop-filter:blur(16px);
+    -webkit-backdrop-filter:blur(16px);
+    border:1px solid rgba(255,255,255,0.10);
+    border-bottom:none;
+    border-radius:16px 16px 0 0;
+    box-shadow:0 -10px 36px rgba(0,0,0,0.5);
+    display:flex; flex-direction:column;
+    overflow:hidden;
+    pointer-events:auto;
+    z-index:40;
+    transition:transform var(--panel-dur, 220ms) cubic-bezier(.22,.85,.32,1), max-height var(--panel-dur, 220ms) ease;
+  }
+  #profilePanel.open{ transform:translate(-50%, 0); }
+  #profilePanel.collapsed{ max-height:50px; }
+  #profilePanel.switching .profile-body{ opacity:0; }
+
+  .profile-tab-header{
+    display:flex; align-items:center; gap:8px;
+    padding:12px 8px 12px 14px;
+    cursor:pointer;
+    flex-shrink:0;
+    background:linear-gradient(180deg, rgba(255,255,255,0.05), transparent);
+    border-bottom:1px solid rgba(255,255,255,0.06);
+  }
+  .profile-tab-icon{ font-size:15px; }
+  .profile-tab-title{ font-weight:600; font-size:13.5px; flex:1; }
+  .profile-tab-btn{
+    width:27px; height:27px; border-radius:7px;
+    display:flex; align-items:center; justify-content:center;
+    background:transparent; border:none; color:var(--text-dim);
+    cursor:pointer; flex-shrink:0;
+  }
+  .profile-tab-btn:hover{ background:rgba(255,255,255,0.09); color:var(--text); }
+  .profile-tab-btn:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+  .profile-tab-btn svg{ width:14px; height:14px; }
+  .profile-tab-btn.collapse-btn svg{ transition:transform 0.25s ease; }
+  #profilePanel.collapsed .collapse-btn svg{ transform:rotate(180deg); }
+
+  .profile-body{
+    padding:14px 16px 16px;
+    overflow-y:auto;
+    transition:opacity 0.15s ease;
+  }
+
+  .profile-media{
+    position:relative; width:100%; aspect-ratio:16/9;
+    border-radius:10px; overflow:hidden;
+    background:linear-gradient(135deg,#1b2432,#0c1017);
+    border:1px solid rgba(255,255,255,0.07);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;
+  }
+  .profile-media, .profile-media .media-img{ -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  .profile-media .media-img{ -webkit-user-drag:none; }
+  .profile-media .ph-icon{ font-size:26px; opacity:0.5; }
+  .profile-media .ph-label{ font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-dim); }
+  .profile-media .ph-caption{ font-size:11.5px; color:var(--text-dim); padding:0 16px; text-align:center; line-height:1.4; }
+
+  /* Image placeholder card: shows the image once a URL is set (and loads), otherwise the placeholder. */
+  .profile-media .media-img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .profile-media .media-img[hidden]{ display:none; }
+  .media-caption-overlay{
+    position:absolute; left:0; right:0; bottom:0; z-index:2; padding:22px 14px 18px;
+    font-size:11px; line-height:1.35; text-align:center; color:#f0f0f0; pointer-events:none;
+    background:linear-gradient(to top, rgba(0,0,0,0.72), rgba(0,0,0,0));
+  }
+  .media-caption-overlay[hidden]{ display:none; }
+  .media-edit{
+    position:absolute; top:7px; right:7px; z-index:3;
+    width:24px; height:24px; border-radius:50%;
+    background:rgba(0,0,0,0.4); border:none; color:#f0f0f0;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .media-edit svg{ width:13px; height:13px; }
+  .media-edit:focus-visible{ outline:2px solid var(--accent); }
+  .media-edit.active{ color:var(--accent); }
+  .media-url-bar{
+    position:absolute; left:38px; right:38px; bottom:22px; z-index:4;
+    display:flex; align-items:center; gap:6px; padding:4px 5px 4px 9px; border-radius:999px;
+    background:rgba(8,12,18,0.9); border:1px solid var(--panel-border);
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+  }
+  .media-url-bar[hidden]{ display:none; }
+  .media-url-bar.invalid{ border-color:#f87171; }
+  .media-url-bar input{
+    flex:1; min-width:0; background:transparent; border:none; outline:none;
+    color:var(--text); font:11.5px Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; padding:3px 0;
+  }
+  .media-url-bar input::placeholder{ color:var(--text-dim); }
+  .media-url-bar button{
+    flex:none; width:24px; height:24px; border-radius:50%; border:none; cursor:pointer;
+    background:rgba(143,227,199,0.16); color:var(--accent);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .media-url-bar button svg{ width:13px; height:13px; }
+
+  .media-arrow{
+    z-index:3;
+    position:absolute; top:50%; transform:translateY(-50%);
+    width:24px; height:24px; border-radius:50%;
+    background:rgba(0,0,0,0.4); border:none; color:#f0f0f0;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .media-arrow[hidden]{ display:none; }   /* author display:flex above would otherwise beat the hidden attribute */
+  .media-arrow:focus-visible{ outline:2px solid var(--accent); }
+  .media-arrow.prev{ left:7px; } .media-arrow.next{ right:7px; }
+  .media-arrow svg{ width:13px; height:13px; }
+
+  .media-dots{ position:absolute; bottom:7px; display:flex; gap:5px; z-index:3; }
+  .media-dot{ width:5px; height:5px; border-radius:50%; background:rgba(255,255,255,0.28); }
+  .media-dot.active{ background:var(--accent); }
+
+  .profile-desc{ font-size:12.5px; line-height:1.55; color:var(--text); margin-top:11px; }
+  .profile-energy{ font-family:Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size:12px; color:var(--accent); margin-top:9px; }
+
+  @media (max-width:520px){
+    #profilePanel{ width:100vw; border-radius:14px 14px 0 0; }
+    .profile-media .ph-icon{ font-size:22px; }
+  }
+
+  @media (max-width:520px){
+    .bottom-row{ align-items:stretch; flex-direction:column; gap:8px; }
+    .panel{ min-width:0; width:100%; max-width:none; }
+    .reset-btn{ align-self:flex-end; }
+    .hint{ display:none; }               /* replaced by the "?" controls toggle below on narrow screens */
+    /* On narrow screens the Save/Export/Import row no longer floats fixed
+       over the Trophic Level card (which is what caused it to collide with
+       the card's flow-nav controls). It becomes a normal, full-width,
+       wrapping row in the same stacked column as the card and Reset button,
+       so it always reflows below the card instead of overlapping it. */
+    .export-actions{
+      position:static;
+      right:auto; bottom:auto;
+      width:100%;
+      flex-wrap:wrap;
+      row-gap:8px;
+    }
+  }
+
+  /* ---------------------------------------------------------
+     ORGANISM ASSET EDITOR
+     Closed by default; it never captures input unless open.
+  --------------------------------------------------------- */
+  /* Header tools: "Edit organisms" and "Simulate mortality" as minimalist icon buttons (same look as the export icons). */
+  .header-tools{ display:flex; align-items:center; gap:8px; margin-top:10px; pointer-events:none; }
+  .tool-btn{
+    width:34px; height:34px; padding:0; border-radius:9px;
+    pointer-events:auto; display:grid; place-items:center; cursor:pointer;
+    color:var(--text); background:var(--panel-bg); border:1px solid var(--panel-border);
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    -webkit-tap-highlight-color:transparent;
+    transition:border-color .15s ease, color .15s ease, background .15s ease, opacity .2s ease;
+  }
+  .tool-btn svg{ width:16px; height:16px; }
+  @media (pointer:coarse){ .tool-btn{ width:42px; height:42px; } .tool-btn svg{ width:18px; height:18px; } }
+  .tool-btn:hover, .tool-btn.active{ border-color:rgba(143,227,199,0.7); color:var(--accent); }
+  .tool-btn:active:not(:disabled){ border-color:#8fe3c7; color:#8fe3c7; background:rgba(143,227,199,0.14); }
+  .tool-btn:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  .tool-btn:disabled{ opacity:0.38; cursor:not-allowed; }
+  /* Smooth habitat switch: a short fade to the water colour covers the reload */
+  #ecoFade{ position:fixed; inset:0; z-index:300; display:flex; align-items:center; justify-content:center;
+    background:var(--bg); opacity:0; visibility:hidden; pointer-events:none;
+    transition:opacity .45s ease, visibility 0s linear .45s; }
+  #ecoFade.on{ opacity:1; visibility:visible; pointer-events:auto; transition:opacity .32s ease; }
+  #ecoFade.instant{ transition:none; }
+  .eco-fade-msg{ color:var(--text-dim); font:500 13px/1.4 Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; letter-spacing:0.04em; }
+  @media (prefers-reduced-motion: reduce){ #ecoFade, #ecoFade.on{ transition:none; } }
+  /* Pond | Open sea habitat switch */
+  .habitat-switch{ pointer-events:auto; display:flex; height:34px; border-radius:9px; overflow:hidden;
+    background:var(--panel-bg); border:1px solid var(--panel-border);
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); }
+  .habitat-btn{ border:0; margin:0; padding:0 11px; background:transparent; color:var(--text-dim); cursor:pointer;
+    font:600 11.5px/1 Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    letter-spacing:0.02em; -webkit-tap-highlight-color:transparent; transition:background .15s ease, color .15s ease; }
+  .habitat-btn + .habitat-btn{ border-left:1px solid var(--panel-border); }
+  .habitat-btn[aria-pressed="true"]{ background:rgba(143,227,199,0.16); color:var(--accent); }
+  .habitat-btn:hover{ color:var(--text); }
+  .habitat-btn:focus-visible{ outline:2px solid var(--accent); outline-offset:-2px; }
+  @media (pointer:coarse){ .habitat-switch{ height:42px; } .habitat-btn{ padding:0 13px; font-size:12.5px; } }
+  .dev-mortality-control{ display:none; color:#c9b99e; }              /* shown by script in dev mode */
+  .dev-mortality-control:hover{ border-color:rgba(201,185,158,0.55); color:#e1d3bb; }
+
+  /* ---- First-run intro card + reopenable legend ---- */
+  .intro-overlay{
+    position:fixed; inset:0; z-index:70; display:flex; align-items:center; justify-content:center;
+    padding:calc(24px + env(safe-area-inset-top, 0px)) calc(24px + env(safe-area-inset-right, 0px))
+            calc(24px + env(safe-area-inset-bottom, 0px)) calc(24px + env(safe-area-inset-left, 0px));
+    background:rgba(0,0,0,0.46); backdrop-filter:blur(10px) saturate(80%); -webkit-backdrop-filter:blur(10px) saturate(80%);
+    opacity:1; transition:opacity .26s ease, backdrop-filter .26s ease;
+    pointer-events:auto;               /* overrides the inherited pointer-events:none once moved out of #ui */
+  }
+  .intro-overlay[hidden]{ display:none; }
+  .intro-overlay.closing{ opacity:0; }
+  .intro-overlay.closing .intro-card{ opacity:0; transform:translateY(8px) scale(0.98); }
+  .intro-card{
+    position:relative; width:100%; max-width:320px; border-radius:22px; padding:20px 20px 18px;
+    background:
+      linear-gradient(145deg, rgba(255,255,255,0.075), rgba(255,255,255,0.025)),
+      rgba(9,14,23,0.6);
+    border:1px solid rgba(255,255,255,0.14);
+    backdrop-filter:blur(22px) saturate(125%); -webkit-backdrop-filter:blur(22px) saturate(125%);
+    box-shadow:0 20px 70px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.08);
+    overflow:hidden;
+    opacity:0; transform:translateY(6px) scale(0.97);
+    animation:introCardIn .3s cubic-bezier(0.22,1,0.36,1) forwards;
+    transition:opacity .26s ease, transform .26s cubic-bezier(0.4,0,1,1);
+  }
+  .intro-card::before{
+    content:""; position:absolute; inset:0; pointer-events:none; border-radius:inherit;
+    background:linear-gradient(160deg, rgba(255,255,255,0.16), rgba(255,255,255,0) 45%);
+    opacity:0.4;
+  }
+  @keyframes introCardIn{
+    from{ opacity:0; transform:translateY(6px) scale(0.97); }
+    to{ opacity:1; transform:translateY(0) scale(1); }
+  }
+  .intro-card h2{ margin:0 0 4px; font-size:17px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .intro-card h2 svg{ width:22px; height:22px; flex:none; }
+  .intro-card p.intro-sub{ margin:0 0 14px; font-size:12.5px; color:var(--text-dim); line-height:1.4; }
+  .intro-steps{ list-style:none; margin:0 0 16px; padding:0; display:flex; flex-direction:column; gap:8px; }
+  .intro-steps li{ display:flex; align-items:flex-start; gap:9px; font-size:12.5px; line-height:1.4; }
+  .intro-steps .n{
+    flex:none; width:20px; height:20px; border-radius:50%; margin-top:0.5px;
+    display:grid; place-items:center; font-size:10.5px; font-weight:700;
+    color:#04140d;
+    background:linear-gradient(150deg, rgba(143,227,199,0.85), rgba(143,227,199,0.55));
+    box-shadow:0 0 0 1px rgba(143,227,199,0.3), 0 0 9px rgba(143,227,199,0.3);
+  }
+  .intro-legend{ margin:0 0 16px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.09); }
+  .intro-legend .row{ display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--text-dim); margin-top:7px; }
+  .intro-legend .row:first-child{ margin-top:0; }
+  .intro-legend .sw{ flex:none; width:9px; height:9px; border-radius:50%; }
+  .intro-actions{ display:flex; justify-content:flex-end; }
+  .intro-dismiss{
+    border:none; border-radius:11px; padding:8px 16px; font:600 12.5px Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color:#05070d; background:var(--accent); cursor:pointer; -webkit-tap-highlight-color:transparent;
+    transition:box-shadow .15s ease, transform .1s ease, opacity .15s ease;
+  }
+  .intro-dismiss:hover{ box-shadow:0 0 0 5px rgba(143,227,199,0.16); }
+  .intro-dismiss:active{ opacity:0.85; transform:scale(0.97); }
+  @media (max-width:520px){
+    .intro-card{ width:calc(100vw - 32px); max-width:360px; }
+  }
+
+  .legend-toggle-wrap{ position:relative; }
+  .legend-popover{
+    position:absolute; top:calc(100% + 8px); left:0; z-index:61; width:184px;
+    padding:11px 13px; border-radius:12px;
+    background:var(--panel-bg); border:1px solid var(--panel-border);
+    backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+    box-shadow:0 10px 30px rgba(0,0,0,0.45);
+  }
+  .legend-popover[hidden]{ display:none; }
+  .legend-popover .row{ display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-dim); margin-top:7px; }
+  .legend-popover .row:first-child{ margin-top:0; }
+  .legend-popover .sw{ flex:none; width:9px; height:9px; border-radius:50%; }
+  #organismEditorPanel{
+    position:fixed;
+    top:14px; right:14px;
+    width:min(390px, calc(100vw - 28px));
+    max-height:calc(100vh - 28px);
+    background:rgba(10,14,22,0.96);
+    backdrop-filter:blur(16px);
+    -webkit-backdrop-filter:blur(16px);
+    border:1px solid rgba(255,255,255,0.12);
+    border-radius:14px;
+    box-shadow:0 12px 40px rgba(0,0,0,0.48);
+    display:none;
+    flex-direction:column;
+    overflow:hidden;
+    pointer-events:auto;
+    z-index:50;
+  }
+  #organismEditorPanel.open{ display:flex; }
+  /* Small box that opens when you long-press an organism picture on the pyramid */
+  #organismUrlBox{
+    position:fixed; left:50%; bottom:18px; transform:translateX(-50%);
+    width:min(380px, calc(100vw - 32px));
+    background:rgba(10,14,22,0.96); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+    border:1px solid rgba(255,255,255,0.12); border-radius:14px; box-shadow:0 12px 40px rgba(0,0,0,0.48);
+    padding:12px; display:flex; flex-direction:column; gap:9px; z-index:55; pointer-events:auto;
+  }
+  #organismUrlBox[hidden]{ display:none; }
+  .org-url-head{ display:flex; align-items:center; gap:10px; }
+  .org-url-thumb{ flex:none; width:52px; height:38px; object-fit:contain; border-radius:6px; background:rgba(255,255,255,0.05); }
+  .org-url-thumb.missing{ opacity:0.25; }
+  .org-url-title{ flex:1; font-size:13px; font-weight:600; color:var(--text); }
+  .org-url-sub{ display:block; font-size:10.5px; font-weight:400; color:var(--text-dim); margin-top:2px; }
+  #organismUrlInput{
+    width:100%; box-sizing:border-box; padding:8px 10px; border-radius:8px;
+    background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); outline:none;
+    color:var(--text); font:12px Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  }
+  #organismUrlInput:focus{ border-color:var(--accent); }
+  #organismUrlBox.invalid #organismUrlInput{ border-color:#f87171; }
+  .org-url-actions{ display:flex; gap:8px; justify-content:flex-end; }
+  .org-url-actions button{
+    min-height:32px; padding:0 13px; border-radius:8px; cursor:pointer; font-size:12px;
+    border:1px solid rgba(255,255,255,0.12); background:transparent; color:var(--text);
+  }
+  .org-url-actions button:focus-visible{ outline:2px solid var(--accent); }
+  #organismUrlApply{ background:rgba(143,227,199,0.16); border-color:rgba(143,227,199,0.4); color:var(--accent); font-weight:600; }
+  .organism-editor-head{
+    display:flex; align-items:center; gap:10px;
+    padding:13px 14px 11px;
+    border-bottom:1px solid rgba(255,255,255,0.08);
+    flex-shrink:0;
+  }
+  .organism-editor-title{ font-size:14px; font-weight:600; flex:1; }
+  .organism-editor-close{
+    width:28px; height:28px; border-radius:7px;
+    display:flex; align-items:center; justify-content:center;
+    background:transparent; border:1px solid transparent;
+    color:var(--text-dim); font-size:18px; cursor:pointer;
+  }
+  .organism-editor-close:hover{ background:rgba(255,255,255,0.08); color:var(--text); }
+  .organism-editor-close:focus-visible{ outline:2px solid var(--accent); }
+  .organism-editor-help{
+    padding:10px 14px 8px;
+    font-size:11px; line-height:1.4; color:var(--text-dim);
+  }
+  #organismEditorList{
+    overflow-y:auto;
+    padding:0 10px 10px;
+  }
+  .organism-editor-row{
+    display:grid;
+    grid-template-columns:64px minmax(0,1fr);
+    gap:10px;
+    align-items:center;
+    padding:9px 4px;
+    border-top:1px solid rgba(255,255,255,0.06);
+  }
+  .organism-editor-preview{
+    width:64px; height:50px;
+    border-radius:8px;
+    object-fit:contain;
+    background:rgba(255,255,255,0.045);
+    border:1px solid rgba(255,255,255,0.08);
+  }
+  .organism-editor-preview.missing{ opacity:0.25; }
+  .organism-editor-meta{ min-width:0; }
+  .organism-editor-label{
+    display:block; font-size:11px; color:var(--text);
+    margin-bottom:5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .organism-editor-input{
+    width:100%;
+    border:1px solid rgba(255,255,255,0.12);
+    border-radius:7px;
+    background:rgba(0,0,0,0.24);
+    color:var(--text);
+    font:10px Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    padding:7px 8px;
+    outline:none;
+  }
+  .organism-editor-input:focus{ border-color:var(--accent); box-shadow:0 0 0 2px rgba(143,227,199,0.12); }
+  .organism-editor-foot{
+    display:flex; justify-content:space-between; gap:8px;
+    padding:10px 14px 13px;
+    border-top:1px solid rgba(255,255,255,0.08);
+    flex-shrink:0;
+  }
+  .organism-editor-foot button{
+    border:1px solid rgba(255,255,255,0.12);
+    border-radius:7px;
+    background:rgba(255,255,255,0.05);
+    color:var(--text-dim);
+    font:10.5px Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    padding:6px 9px;
+    cursor:pointer;
+  }
+  .organism-editor-foot button:hover{ color:var(--text); border-color:rgba(255,255,255,0.28); }
+  .organism-editor-foot button:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+  @media (max-width:520px){
+    #organismEditorPanel{ top:10px; right:10px; width:calc(100vw - 20px); max-height:calc(100vh - 20px); }
+  }
+
+  /* =========================================================
+     UI/UX POLISH LAYER — presentation only. Simulation, energy,
+     heat and biomass logic are untouched.
+     Tokens: controls 34px (42px on touch), radius 10px; cards 14px.
+  ========================================================= */
+  :root{ --btn:34px; --btn-r:10px; --card-r:14px; --hair:rgba(255,255,255,0.07); --energy:#c6ea5a; }
+  @media (pointer:coarse){ :root{ --btn:42px; } }
+
+  /* Header: eye + a left-aligned title/subtitle stack, centred as one unit */
+  .header .title-row{ gap:10px; }
+  .header .brand-text{ display:flex; flex-direction:column; align-items:flex-start; line-height:1.15; }
+  .header .title{ font-size:clamp(17px,2.8vw,21px); letter-spacing:0.005em; }
+  .header .subtitle{ margin-top:2px; font-size:12px; letter-spacing:0.02em; text-transform:none; }   /* sentence case: the longer subtitle must fit a 360px phone */
+  .header .brand-eye{ width:34px; height:34px; transform-origin:50% 50%; }
+  #ui:has(.solar-status.on) .brand-eye{ animation:orbPulse 3.8s ease-in-out infinite; }
+  @keyframes orbPulse{ 0%,100%{ transform:scale(1); opacity:.9; } 50%{ transform:scale(1.045); opacity:1; } }
+
+  /* PAR status: compact scientific readout chip */
+  .solar-status{
+    width:fit-content; max-width:100%; margin:9px auto 0; padding:5px 11px;
+    justify-content:center; align-items:center; gap:7px;
+    font-size:11px; line-height:1.3; text-align:center; letter-spacing:0.01em; color:var(--text-dim);
+    border:1px solid var(--hair); border-radius:var(--card-r); background:rgba(10,14,22,0.5);
+    transition:color .4s ease, border-color .4s ease;
+  }
+  .solar-status .dot{ flex:none; width:8px; height:8px; background:transparent; border:1.5px solid #8a6f3a; box-shadow:none; }
+  .solar-status.on{ color:#f3d9a0; border-color:rgba(255,212,121,0.32); }
+  .solar-status.on .dot{ background:#ffd479; border-color:#ffd479; box-shadow:0 0 6px rgba(255,212,121,0.55); }
+
+  /* Buttons: one size, one radius, one press state */
+  .tool-btn, .export-btn, .flow-nav-btn, .hint-toggle{
+    width:var(--btn); height:var(--btn); border-radius:var(--btn-r);
+    border:1px solid rgba(255,255,255,0.11);
+    transition:border-color .15s ease, color .15s ease, background .15s ease, opacity .2s ease, transform .12s ease;
+  }
+  .tool-btn svg, .export-btn svg, .flow-nav-btn svg{ width:18px; height:18px; stroke-width:1.7; }
+  @media (pointer:fine){ .tool-btn svg, .export-btn svg, .flow-nav-btn svg{ width:16px; height:16px; } }
+  .tool-btn:active:not(:disabled), .export-btn:active, .flow-nav-btn:active:not(:disabled), .hint-toggle:active{ transform:scale(0.95); }
+  .hint-toggle{ display:none; margin-left:0; }
+  @media (max-width:520px){ .hint-toggle{ display:inline-grid; place-items:center; } }
+  .export-actions{ gap:8px; }
+
+  /* Cards */
+  .panel{ border-radius:var(--card-r); padding:12px 14px; }
+  .panel-actions{ margin-top:10px; padding-top:10px; border-top:1px solid var(--hair); gap:8px 10px; }
+
+  /* Graph */
+  .eco-graph{ margin:0; }
+  .eco-var-label{ font-size:10.5px; letter-spacing:0.08em; }
+  .eco-value-label{ font-size:10.5px; fill:var(--text); }
+  .eco-var-underline{ stroke:var(--hair); }
+  .eco-axis-label{ font-size:9px; letter-spacing:0.04em; }
+  .eco-trace{ stroke-width:2; }
+  .eco-marker{ stroke:var(--bg); stroke-width:1.2; transition:cx .35s ease, cy .35s ease, r .2s ease, fill .3s ease; }
+  .eco-guide{ transition:opacity .2s ease; }
+  .eco-value-label{ transition:opacity .2s ease; }
+
+  /* Segmented control: ENERGY | HEAT | BIOMASS */
+  .eco-var-selector{
+    display:grid; grid-template-columns:repeat(3,1fr); gap:2px; margin-top:8px; padding:2px;
+    border-radius:var(--btn-r); background:rgba(255,255,255,0.04); border:1px solid var(--hair);
+  }
+  .eco-var-btn{
+    min-height:26px; padding:0 6px; font-size:9.5px; letter-spacing:0.06em; text-align:center;
+    background:transparent; border:0; border-radius:8px; color:var(--text-dim);
+    transition:background .25s ease, color .25s ease;
+  }
+  .eco-var-btn:not(.active):hover{ color:var(--text); }
+  .eco-var-btn.active{ font-weight:700; }
+  @media (pointer:coarse){ .eco-var-btn{ min-height:34px; font-size:10px; } }
+
+  /* Step indicator: "1 / 7 · PAR" */
+  .flow-nav{ gap:4px; }
+  .flow-nav-status{
+    display:flex; align-items:baseline; justify-content:center; gap:5px;
+    min-width:96px; max-width:none; padding:0 4px; font-size:12px; color:var(--text-dim);
+  }
+  .flow-nav-status .fn-count{ color:var(--text); font-weight:600; flex:none; }
+  .flow-nav-status .fn-sep{ opacity:.45; flex:none; }
+  .flow-nav-status .fn-label{ color:var(--accent); min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .flow-nav-status.on{ color:var(--text-dim); }
+
+  /* Reset view: quiet utility */
+  .reset-btn{
+    background:transparent; -webkit-backdrop-filter:none; backdrop-filter:none;
+    border:1px solid transparent; color:var(--text-dim);
+    font-size:11.5px; padding:0 10px; min-height:36px; border-radius:var(--btn-r); gap:6px;
+  }
+  .reset-btn:hover{ color:var(--text); border-color:var(--hair); }
+  .reset-btn:active{ transform:scale(0.97); }
+  @media (pointer:coarse){ .reset-btn{ min-height:42px; } }
+
+  @media (max-width:520px){
+    .bottom-row{ gap:6px; }
+    .panel{ padding:11px 12px; }
+    .export-actions{ justify-content:flex-start; }
+  }
+
+  @media (max-width:520px){ .solar-status{ min-height:calc(2.6em + 12px); } }   /* fixed height: framing never shifts when the PAR text changes */
+  @media (max-width:520px){   /* Save/Export/Import and Reset share one row: gives the pyramid more room above the card */
+    .bottom-row{ flex-direction:row; flex-wrap:wrap; align-items:center; gap:6px 8px; }
+    .panel{ flex:1 1 100%; }
+    .export-actions{ width:auto; flex:0 0 auto; }
+    .reset-btn{ align-self:auto; margin-left:auto; }
+  }
+  /* Graph focus (positions/opacity are tweened in JS; only colour/glow use CSS transitions) */
+  .eco-marker{ transition:fill .3s ease, filter .3s ease; }
+  .eco-marker.sel{ filter:drop-shadow(0 0 2.5px currentColor); }
+  .eco-trace{ transition:stroke .3s ease; }
+  .eco-guide, .eco-value-label{ transition:none; }
+  .eco-value-unit{ font-size:7.5px; fill:var(--text-dim); letter-spacing:0.04em; }
+  button, input, textarea, select{ font-family:inherit; }
+
+  /* ---- Legibility: readable graph card on large screens and over bright scene areas ---- */
+  .panel{ background:rgba(10,14,22,0.8); }                        /* was 0.55: the Sun/pyramid glow no longer washes out the text */
+  .eco-axis-label{ font-size:9.5px; fill:#a7b3c9; }
+  .eco-scale-note{ font-size:7.5px; fill:#7f8ca3; letter-spacing:0.03em; font-style:italic; }   /* "log scale" / "√ scale": the line shows direction, not true proportions */
+  .eco-value-unit{ font-size:8.5px; fill:#a7b3c9; }
+  /* other habitat's biomass shape (BIOMASS tab): faint dashed reference line + its legend */
+  .eco-ghost{ fill:none; stroke:#9fb3c8; stroke-width:1.2; stroke-dasharray:3 2.5; stroke-linecap:round; transition:opacity .3s ease; }
+  .eco-ghost-legend{ transition:opacity .3s ease; }
+  .eco-ghost-legend line{ stroke:#9fb3c8; stroke-width:1.2; stroke-dasharray:3 2.5; }
+  .eco-ghost-legend text{ font-size:8.5px; fill:#9fb3c8; letter-spacing:0.03em; }
+  .eco-var-btn:not(.active){ color:#a7b3c9; }
+  .flow-nav-status .fn-sep{ opacity:.7; }
+  @media (min-width:900px){                                        /* the card and everything in it grows with the screen (SVG text scales with its width) */
+    .panel{ width:clamp(260px, 24vw, 440px); max-width:none; padding:clamp(10px,0.9vw,16px) clamp(14px,1.2vw,20px); }
+    .eco-var-btn{ font-size:clamp(9.5px,0.55vw,12px); min-height:clamp(26px,1.9vw,34px); }
+    .flow-nav-status{ font-size:clamp(12px,0.8vw,14px); }
+    .hint{ font-size:clamp(11px,0.7vw,13px); }
+  }
+  /* ---- Collapsible graph: the graph slides out to the LEFT and folds away; the chart button at the
+     left of the step row brings it back. The card shrinks, so on phones the pyramid gets the room. ---- */
+  .eco-graph-fold{
+    display:grid; grid-template-rows:1fr;
+    transition:grid-template-rows .35s ease, opacity .25s ease, transform .35s ease;
+  }
+  .eco-graph-fold > .eco-graph{ min-height:0; overflow:hidden; padding:0 14px; margin:0 -14px; }   /* side room so the "TL4" label (it overhangs the graph edge) is not clipped */
+  #infoPanel.graph-collapsed .eco-graph-fold{
+    grid-template-rows:0fr; opacity:0; transform:translateX(-110%); pointer-events:none;
+  }
+  #infoPanel.graph-collapsed .eco-graph-fold > .eco-graph{ visibility:hidden; transition:visibility 0s .35s; }
+  #infoPanel.graph-collapsed .panel-actions{ margin-top:0; padding-top:0; border-top-color:transparent; }
+  .panel-actions{ flex-wrap:nowrap; transition:margin .35s ease, padding .35s ease, border-color .35s ease; }
+  .panel-actions .flow-nav{ flex:1; width:auto; min-width:0; }
+  .eco-collapse-btn{ flex:none; border-radius:var(--btn-r, 10px); }
+  .eco-collapse-btn .eco-chev-show{ display:none; }
+  #infoPanel.graph-collapsed .eco-collapse-btn{ color:var(--accent); border-color:rgba(143,227,199,0.45); }
+  #infoPanel.graph-collapsed .eco-collapse-btn .eco-chev-hide{ display:none; }
+  #infoPanel.graph-collapsed .eco-collapse-btn .eco-chev-show{ display:inline; }
+  @media (prefers-reduced-motion:reduce){ .eco-graph-fold, .panel-actions{ transition:none; } }
+  /* ---- Step 2 (Producers): Gross -> Net primary productivity readout, floating just above the card ---- */
+  #infoPanel{ position:relative; }
+  .prod-readout{
+    position:absolute; left:0; right:0; bottom:calc(100% + 8px);
+    padding:9px 11px; border-radius:var(--card-r, 12px);
+    background:rgba(10,14,22,0.88); border:1px solid rgba(255,212,121,0.28);
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    pointer-events:none; animation:prodIn .3s ease;
+  }
+  .prod-readout[hidden]{ display:none; }
+  @keyframes prodIn{ from{ opacity:0; transform:translateY(4px); } to{ opacity:1; transform:none; } }
+  .prod-row{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .prod-chip{
+    display:inline-flex; align-items:baseline; gap:4px; padding:3px 8px; border-radius:7px;
+    font-size:12px; color:var(--text); background:rgba(255,255,255,0.05); white-space:nowrap;
+  }
+  .prod-chip b{ font-weight:700; letter-spacing:0.04em; }
+  .prod-chip i{ font-style:normal; font-size:10px; color:#ff9b54; }
+  .prod-gpp b{ color:#ffd479; }
+  .prod-r b{ color:#ff9b54; }
+  .prod-npp{ background:rgba(74,222,128,0.14); }
+  .prod-npp b{ color:#4ade80; }
+  .prod-op{ font-size:13px; color:var(--text-dim); }
+  .prod-tl2 b{ color:#facc15; }
+  .prod-litter b{ color:#c9a876; }
+  .prod-humus b{ color:#c9a876; }
+  /* collapsible step card: the chevron hides the explanation so the pyramid stays visible */
+  .prod-readout .prod-row{ padding-right:30px; }
+  .prod-toggle{ position:absolute; top:6px; right:6px; width:26px; height:26px; padding:0; border-radius:7px;
+    display:grid; place-items:center; cursor:pointer; pointer-events:auto;
+    color:var(--text-dim); background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12);
+    -webkit-tap-highlight-color:transparent; transition:color .15s ease, border-color .15s ease; }
+  .prod-toggle:hover{ color:var(--text); border-color:rgba(143,227,199,0.6); }
+  .prod-toggle:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  .prod-toggle svg{ width:14px; height:14px; transition:transform .2s ease; }
+  .prod-readout.collapsed{ padding-top:7px; padding-bottom:7px; }
+  .prod-readout.collapsed .prod-toggle svg{ transform:rotate(180deg); }
+  .prod-readout.collapsed .prod-note{ display:none; }
+  @media (pointer:coarse){ .prod-toggle{ width:32px; height:32px; top:4px; right:4px; } .prod-readout .prod-row{ padding-right:36px; } }
+  .prod-ions{ background:rgba(143,227,199,0.12); }
+  .prod-ions b, .prod-ions i{ color:#9ff0d4; }
+  .prod-chip sub, .prod-chip sup{ font-size:0.68em; line-height:0; }
+  .prod-set[hidden]{ display:none; }
+  .prod-note{ margin-top:6px; font-size:10.5px; line-height:1.4; color:#a7b3c9; }
+  .prod-readout [data-stage]{ transition:opacity .4s ease; }
+  .prod-readout [data-stage].pending{ opacity:0; }
+  .prod-note span.pending{ display:none; }
+  @media (prefers-reduced-motion:reduce){ .prod-readout{ animation:none; } .prod-readout [data-stage]{ transition:none; } }
+  /* Explanatory diagrams: show the whole picture (labels and legend are part of it), not a cropped fill */
+  .profile-media .media-img{ object-fit:contain; }
+  .profile-media:has(.media-img:not([hidden])){ background:#fff; aspect-ratio:3/2; }
+  .profile-media:has(.media-img:not([hidden])) .media-caption-overlay{ display:none; }   /* the image carries its own labels; alt text keeps the caption for screen readers */
+  /* Hold-to-restore / hold-to-unlock affordance: a growing accent ring while the gesture is held */
+  .organism-editor-toggle, .media-edit{
+    box-shadow:0 0 0 calc(var(--hold, 0) * 3px) rgba(143,227,199, calc(var(--hold, 0) * 0.55));
+    touch-action:manipulation; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none;
+  }
+  @keyframes lockedNudge{ 0%,100%{ transform:translateX(0); } 25%{ transform:translateX(-2px); } 75%{ transform:translateX(2px); } }
+  .media-edit.locked-nudge{ animation:lockedNudge .22s ease; }
+  .sr-only{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  .organism-editor-toggle{ box-shadow:0 0 0 calc(var(--hold, 0) * 5px) rgba(143,227,199, calc(var(--hold, 0) * 0.7)); }   /* larger/brighter than the shared 3px ring: this hold runs 15s, not 600ms, and needs to read clearly over that long a wait */
+  .organism-editor-toggle.locked-nudge{ animation:lockedNudge .22s ease; }
+  .tool-btn.dimmed{ opacity:0.38; cursor:not-allowed; }
+  .dev-mortality-control{ box-shadow:0 0 0 calc(var(--hold, 0) * 5px) rgba(251,146,60, calc(var(--hold, 0) * 0.65)); }   /* orange, matching this button's own accent, for its 10s revive hold */
+  @media (prefers-reduced-motion:reduce){
+    .brand-eye, .eco-trace, .eco-marker{ animation:none !important; transition:none !important; }
+    .tool-btn, .export-btn, .flow-nav-btn, .hint-toggle, .reset-btn{ transition:none !important; transform:none !important; }
+    .media-edit.locked-nudge, .organism-editor-toggle.locked-nudge{ animation:none !important; }
+  }
+
+  .flow-nav{ width:100%; justify-content:space-between; }
+  .flow-nav-status{ flex:1; min-width:0; }
+  .hint-toggle{ font:600 15px Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }

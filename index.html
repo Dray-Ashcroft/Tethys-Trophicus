@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tethys Trophicus</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="ui">
+  <div class="header">
+    <div class="title-row">
+      <svg class="brand-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <defs>
+          <radialGradient id="rinnGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0.55" stop-color="#a878ff" stop-opacity="0.55"></stop><stop offset="1" stop-color="#a878ff" stop-opacity="0"></stop>
+          </radialGradient>
+          <radialGradient id="rinnIris" cx="50%" cy="50%" r="50%">
+            <stop offset="0" stop-color="#d9c2ff"></stop><stop offset="0.6" stop-color="#9a6cf0"></stop><stop offset="1" stop-color="#5a2fb0"></stop>
+          </radialGradient>
+        </defs>
+        <circle cx="12" cy="12" r="12" fill="url(#rinnGlow)"></circle>
+        <circle cx="12" cy="12" r="8.3" fill="url(#rinnIris)" stroke="#c4a9ff" stroke-opacity="0.85" stroke-width="0.9"></circle>
+        <g fill="none" stroke="#2b1259" stroke-opacity="0.75" stroke-width="0.55">
+          <circle cx="12" cy="12" r="6.9"></circle><circle cx="12" cy="12" r="5.5"></circle><circle cx="12" cy="12" r="4.1"></circle><circle cx="12" cy="12" r="2.7"></circle><circle cx="12" cy="12" r="1.5"></circle>
+        </g>
+        <circle cx="12" cy="12" r="0.8" fill="#160a30"></circle>
+      </svg>
+      <div class="brand-text"><div class="title">Tethys Trophicus</div><div class="subtitle" id="ecoSubtitle">Aquatic · Open sea · Inverted biomass pyramid</div></div>
+    </div>
+    <div class="solar-status" id="solarStatus" aria-live="polite"><span class="dot"></span><span id="solarStatusText">Solar input off — tap the Sun</span></div>
+    <div class="header-tools">
+      <div id="organismLockStatus" class="sr-only" aria-live="polite"></div>
+      <button class="tool-btn organism-editor-toggle" id="organismEditorToggle" type="button" aria-label="Edit organisms (hold 15 seconds to unlock)" title="Edit organisms (hold 15 seconds to unlock)" aria-expanded="false" aria-controls="organismEditorPanel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-6"></path><path d="M17.5 2.6a2.1 2.1 0 0 1 3 3L11.5 14.6l-4 1 1-4 9-9z"></path></svg>
+      </button>
+      <button class="tool-btn dev-mortality-control" id="simulateMortalityBtn" type="button" aria-label="Simulate mortality (hold 10 seconds to restore placeholders)" title="Simulate mortality">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h3.5l2-5.5 3 11 2-5.5H22"></path></svg>
+      </button>
+      <div class="legend-toggle-wrap">
+        <button class="tool-btn" id="legendToggleBtn" type="button" aria-label="Show legend" title="Legend" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5.5"></path><circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none"></circle></svg>
+        </button>
+        <div class="legend-popover" id="legendPopover" hidden="">
+          <div class="row"><span class="sw" style="background:#c6ea5a"></span>Energy transfer — weaker each level up</div>
+          <div class="row"><span class="sw" style="background:#ff9b54"></span>Heat loss — lost outward, never reused</div>
+          <div class="row"><span class="sw" style="background:#c9a876"></span>Detritus — sinks to the decomposers</div>
+          <div class="row"><span class="sw" style="background:#8fe3c7"></span>Mineralisation — decomposers release inorganic nutrients → TL1 only</div>
+        </div>
+      </div>
+      <button class="tool-btn hint-toggle" id="hintToggleBtn" type="button" aria-label="Show controls" title="Controls" aria-expanded="false">?</button>
+      <div class="habitat-switch" id="habitatSwitch" role="group" aria-label="Aquatic habitat">
+        <button class="habitat-btn" type="button" data-eco="pond" aria-pressed="false" title="Plant-rich pond: upright pyramid of biomass">Pond</button>
+        <button class="habitat-btn" type="button" data-eco="sea" aria-pressed="true" title="Open sea: inverted pyramid of biomass">Open sea</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-row">
+    <div class="panel" id="infoPanel">
+      <div class="prod-readout" id="prodReadout" role="status" aria-live="polite" hidden>
+        <button class="prod-toggle" id="prodToggle" type="button" aria-expanded="true" aria-label="Hide explanation" title="Hide explanation">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+        <div class="prod-set" data-step="2">
+        <div class="prod-row">
+          <span class="prod-chip prod-gpp" data-stage="1"><b>GPP</b> 100</span>
+          <span class="prod-op" data-stage="2">−</span>
+          <span class="prod-chip prod-r" data-stage="2"><b>R</b> 50 <i>heat</i></span>
+          <span class="prod-op" data-stage="3">=</span>
+          <span class="prod-chip prod-npp" data-stage="3"><b>NPP</b> 50</span>
+        </div>
+        <div class="prod-note" data-stage="1"><span data-stage="1">GPP: energy fixed in photosynthesis.</span> <span data-stage="2">R: used in the producers' own respiration, lost as heat.</span> <span data-stage="3">NPP: stored as producer biomass (algae, phytoplankton, water plants) — food for grazers and decomposers.</span></div>
+        </div>
+        <div class="prod-set" data-step="3" hidden>
+          <div class="prod-row">
+            <span class="prod-chip prod-npp" data-stage="1"><b>NPP</b> 50</span>
+            <span class="prod-op" data-stage="2">→</span>
+            <span class="prod-chip prod-tl2" data-stage="2"><b>TL2</b> 10 <i>eaten</i></span>
+            <span class="prod-op" data-stage="3">+</span>
+            <span class="prod-chip prod-litter" data-stage="3"><b>Detritus</b> 40</span>
+          </div>
+          <div class="prod-note" data-stage="1"><span data-stage="1">Grazers can only eat what the producers keep after respiration — the NPP, not the GPP.</span> <span data-stage="2">About 10 of it reaches TL2.</span> <span data-stage="3">The other 40 — dead and uneaten plant and algal matter — sinks as detritus to the decomposers (step 6).</span></div>
+        </div>
+        <div class="prod-set" data-step="7" hidden>
+          <div class="prod-row">
+            <span class="prod-chip prod-humus" data-stage="1"><b id="minSourceChip">Humus</b></span>
+            <span class="prod-op" data-stage="2">→</span>
+            <span class="prod-chip prod-ions" data-stage="2"><b>NH<sub>4</sub><sup>+</sup> · NO<sub>3</sub><sup>−</sup> · PO<sub>4</sub><sup>3−</sup></b></span>
+            <span class="prod-op" data-stage="3">→</span>
+            <span class="prod-chip prod-npp" data-stage="3"><b>TL1</b> uptake</span>
+          </div>
+          <div class="prod-note"><span data-stage="1" id="minNote1">Mineralisation: microbes (bacteria) break down humus further…</span> <span data-stage="2">…releasing inorganic nutrients such as ammonium, nitrate and phosphate.</span> <span data-stage="3" id="minNote3">Producers take them up. Matter cycles; energy does not.</span></div>
+        </div>
+      </div>
+      <div class="eco-graph-fold" id="ecoGraphFold">
+      <div class="eco-graph" id="ecoGraph">
+        <svg id="ecoGraphSvg" viewBox="0 0 300 60" role="img" aria-label="Selected variable across trophic levels TL1 to TL4">
+          <text class="eco-var-label" id="ecoVarLabel" x="4" y="10">ENERGY</text>
+          <text class="eco-value-label" id="ecoValueLabel" x="296" y="10" text-anchor="end" style="opacity:0"></text>
+          <line class="eco-var-underline" id="ecoVarUnderline" x1="4" y1="16" x2="296" y2="16"></line>
+
+          <line class="eco-guide" id="ecoGuideLine" x1="10" y1="19" x2="10" y2="46" style="opacity:0"></line>
+
+          <path class="eco-ghost" id="ecoGhost" d="" style="opacity:0"></path>
+          <g class="eco-ghost-legend" id="ecoGhostLegend" style="opacity:0"><line x1="64" y1="7" x2="74" y2="7"></line><text id="ecoGhostText" x="77" y="10"></text></g>
+          <path class="eco-trace" id="ecoTrace" d=""></path>
+
+          <g id="ecoMarkers">
+            <circle class="eco-marker" data-i="0" cx="10" cy="46" r="2.2"></circle>
+            <circle class="eco-marker" data-i="1" cx="105.33" cy="46" r="2.2"></circle>
+            <circle class="eco-marker" data-i="2" cx="200.67" cy="46" r="2.2"></circle>
+            <circle class="eco-marker" data-i="3" cx="296" cy="46" r="2.2"></circle>
+          </g>
+
+          <text class="eco-axis-label" x="10" y="57">TL1</text>
+          <text class="eco-axis-label" x="105.33" y="57">TL2</text>
+          <text class="eco-axis-label" x="200.67" y="57">TL3</text>
+          <text class="eco-scale-note" id="ecoScaleNote" x="153" y="57" text-anchor="middle"></text>
+          <text class="eco-axis-label" x="296" y="57" text-anchor="end">TL4</text>
+        </svg>
+        <div class="eco-var-selector" id="ecoVarSelector" role="group" aria-label="Graph variable">
+          <button class="eco-var-btn active" id="ecoVarEnergyBtn" type="button" title="Plot energy across trophic levels" data-var="energy" aria-pressed="true">ENERGY</button>
+          <button class="eco-var-btn" id="ecoVarHeatBtn" type="button" title="Plot heat across trophic levels" data-var="heat" aria-pressed="false">HEAT</button>
+          <button class="eco-var-btn" id="ecoVarBiomassBtn" type="button" title="Plot biomass across trophic levels" data-var="biomass" aria-pressed="false">BIOMASS</button>
+        </div>
+      </div>
+      </div>
+      <div class="panel-actions">
+        <button class="flow-nav-btn eco-collapse-btn" id="ecoCollapseBtn" type="button" aria-expanded="true" aria-controls="ecoGraphFold" aria-label="Hide graph" title="Hide graph">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 19h11"></path><path d="M10 15l3.5-4 3 2.5L21 8"></path><path class="eco-chev-hide" d="M6.5 8.5 3 12l3.5 3.5"></path><path class="eco-chev-show" d="M3.5 8.5 7 12l-3.5 3.5"></path></svg>
+        </button>
+                <div class="flow-nav" id="flowNav" role="group" aria-label="Ecosystem flow steps">
+          <button class="flow-nav-btn" id="flowPrevBtn" type="button" aria-label="Previous step" title="Previous step" disabled="">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5 9 12l5.5 5.5"></path></svg>
+          </button>
+          <div class="flow-nav-status" id="flowNavStatus" aria-live="polite">0 / 7</div>
+          <button class="flow-nav-btn" id="flowNextBtn" type="button" aria-label="Next step" title="Next step" disabled="">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6.5 15 12l-5.5 5.5"></path></svg>
+          </button>
+        </div>
+      </div>
+      <div class="hint">Drag to rotate · scroll or pinch to zoom · tap to select · hold a layer to open its profile · hold a picture to change its image</div>
+      <div class="hint-popover" id="hintPopover" role="status">Drag to rotate · scroll or pinch to zoom · tap to select · hold a layer to open its profile · hold a picture to change its image · arrow keys rotate · +/− zoom</div>
+    </div>
+    <div class="export-actions" aria-label="Export actions">
+      <button class="export-btn" id="saveHtmlSnapshotBtn" type="button" aria-label="Save HTML snapshot" title="Save HTML snapshot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l3 3v15H5z"></path><path d="M8 3v6h8V3"></path><path d="M8 21v-7h8v7"></path></svg></button>
+      <button class="export-btn" id="exportJsonBtn" type="button" aria-label="Export state JSON" title="Export state JSON"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H5v16h3M16 4h3v16h-3M11 8l-2 4 2 4M13 8l2 4-2 4"></path></svg></button>
+      <button class="export-btn" id="importJsonBtn" type="button" aria-label="Import state JSON" title="Import state JSON"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"></path><path d="m7.5 9.5 4.5-4.5 4.5 4.5"></path><path d="M5 21h14"></path></svg></button>
+      <input type="file" id="importJsonInput" accept="application/json,.json" hidden="">
+    </div>
+    <button class="reset-btn" id="resetBtn" type="button" title="Reset camera view">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+        <path d="M3 4v5h5"></path>
+      </svg>
+      Reset view
+    </button>
+  </div>
+</div>
+
+
+<div id="organismEditorPanel" role="dialog" aria-label="Organism asset editor" aria-hidden="true">
+  <div class="organism-editor-head">
+    <div class="organism-editor-title">Organism assets</div>
+    <button class="organism-editor-close" id="organismEditorClose" type="button" aria-label="Close organism editor">×</button>
+  </div>
+  <div class="organism-editor-help">
+    Paste a direct transparent PNG/WebP URL. Choose an organism here to update its image without changing pyramid geometry.
+  </div>
+  <div id="organismEditorList"></div>
+  <div class="organism-editor-foot">
+    <button id="organismEditorReset" type="button">Restore placeholders</button>
+    <button id="organismEditorDone" type="button">Done</button>
+  </div>
+</div>
+
+<div id="organismUrlBox" role="dialog" aria-label="Change organism image" hidden>
+  <div class="org-url-head">
+    <img class="org-url-thumb" id="organismUrlThumb" alt="">
+    <div class="org-url-title"><span id="organismUrlName">Organism</span><span class="org-url-sub">Paste an image link (PNG or WebP with a transparent background works best)</span></div>
+  </div>
+  <input id="organismUrlInput" type="url" inputmode="url" placeholder="https://.../organism.png" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Image URL">
+  <div class="org-url-actions">
+    <button id="organismUrlOriginal" type="button">Original</button>
+    <button id="organismUrlCancel" type="button">Cancel</button>
+    <button id="organismUrlApply" type="button">Apply</button>
+  </div>
+</div>
+
+<div id="profilePanel" role="dialog" aria-label="Trophic level profile" aria-hidden="true">
+  <div class="profile-tab-header" id="profileTabHeader">
+    <span class="profile-tab-icon" id="profileIcon">🌿</span>
+    <span class="profile-tab-title" id="profileTitle">Producers</span>
+    <button class="profile-tab-btn collapse-btn" id="profileCollapseBtn" type="button" aria-label="Collapse profile" title="Collapse">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+    </button>
+    <button class="profile-tab-btn" id="profileCloseBtn" type="button" aria-label="Close profile" title="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+    </button>
+  </div>
+  <div class="profile-body" id="profileBody">
+    <div class="profile-media" id="profileMedia">
+      <img class="media-img" id="mediaImg" alt="" referrerpolicy="no-referrer" decoding="async" hidden="">
+      <button class="media-arrow prev" id="mediaPrevBtn" type="button" aria-label="Previous example">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg>
+      </button>
+      <span class="ph-icon" id="mediaIcon">🖼️</span>
+      <span class="ph-label" id="mediaLabel">Image placeholder</span>
+      <span class="ph-caption" id="mediaCaption">—</span>
+      <div class="media-caption-overlay" id="mediaCaptionOverlay" hidden=""></div>
+      <button class="media-edit" id="mediaEditBtn" type="button" aria-label="Hold to edit image URL" title="Hold to edit image URL">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"></path><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"></path></svg>
+      </button>
+      <div class="media-url-bar" id="mediaUrlBar" hidden="">
+        <input id="mediaUrlInput" type="url" inputmode="url" placeholder="Paste image URL" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Image URL">
+        <button id="mediaUrlSetBtn" type="button" aria-label="Apply image URL" title="Apply">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+        </button>
+      </div>
+      <button class="media-arrow next" id="mediaNextBtn" type="button" aria-label="Next example">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+      </button>
+      <div class="media-dots" id="mediaDots"></div>
+    </div>
+    <div class="profile-desc" id="profileDesc">—</div>
+    <div class="profile-energy" id="profileEnergy">—</div>
+  </div>
+</div>
+
+<div id="ecoFade" aria-hidden="true"><div class="eco-fade-msg" id="ecoFadeMsg"></div></div>
+<script>
+  // Habitat switch: cover the page from the first paint until the new scene has rendered.
+  try { var efr = sessionStorage.getItem("tethys-trophicus-switch"); if (efr){ var efo = JSON.parse(efr), ef = document.getElementById("ecoFade");
+    ef.className = "on instant"; document.getElementById("ecoFadeMsg").textContent = efo.to === "pond" ? "Pond \u00b7 upright biomass pyramid" : "Open sea \u00b7 inverted biomass pyramid"; } } catch (e) {}
+</script>
+<div class="intro-overlay" id="introOverlay" hidden="">
+  <div class="intro-card">
+    <h2>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><defs><radialGradient id="introIris" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#d9c2ff"></stop><stop offset="0.6" stop-color="#9a6cf0"></stop><stop offset="1" stop-color="#5a2fb0"></stop></radialGradient></defs><circle cx="12" cy="12" r="8.3" fill="url(#introIris)"></circle><circle cx="12" cy="12" r="4.1" fill="none" stroke="#2b1259" stroke-opacity="0.75" stroke-width="0.7"></circle><circle cx="12" cy="12" r="0.9" fill="#160a30"></circle></svg>
+      Start the energy flow
+    </h2>
+    <p class="intro-sub">A seven-step walk through how energy and matter move through an aquatic ecosystem. Energy is always an upright pyramid. The pyramid of <b>biomass</b> is upright in a plant-rich <b>Pond</b> but inverted in the <b>Open sea</b> — use the switch at the top to compare.</p>
+    <ol class="intro-steps">
+      <li><span class="n">1</span>Tap the Sun to activate solar input</li>
+      <li><span class="n">2</span>Use the arrows to step through each stage</li>
+      <li><span class="n">3</span>Energy flows upward and is lost as heat; matter cycles back to producers only</li>
+    </ol>
+    <div class="intro-legend">
+      <div class="row"><span class="sw" style="background:#c6ea5a"></span>Energy transfer — weaker each level up</div>
+      <div class="row"><span class="sw" style="background:#ff9b54"></span>Heat loss — lost outward, never reused</div>
+      <div class="row"><span class="sw" style="background:#c9a876"></span>Detritus — sinks to the decomposers</div>
+      <div class="row"><span class="sw" style="background:#8fe3c7"></span>Mineralisation — decomposers release inorganic nutrients → TL1 only</div>
+    </div>
+    <div class="intro-actions">
+      <button class="intro-dismiss" id="introDismissBtn" type="button">Got it</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="script.js"></script></body></html>
